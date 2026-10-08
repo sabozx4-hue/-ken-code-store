@@ -1,74 +1,49 @@
-# KEN CODE STORE 4.0.0
+# KEN CODE STORE v4.4 — Auto Slip Verification
 
-เว็บร้านค้าดิจิทัลแบบครบระบบสำหรับ Source Code / Script / Website / Bot
-ออกแบบ Mobile-first โทนดำ Premium และใช้ KEN COIN เป็น Wallet
+ระบบร้าน KEN Code Store พร้อมระบบตรวจสอบสลิปธนาคารอัตโนมัติผ่าน EasySlip API v2
 
-## ระบบหน้าร้าน
-- หน้าแรก / สินค้าแนะนำ / หมวดสินค้า
-- ค้นหาและกรองสินค้า
-- หน้ารายละเอียดสินค้า
-- สินค้าหลายแพ็กเกจ/Variants เช่น 1 วัน, 7 วัน, Lifetime
-- ราคาเดิม / ราคาโปร
-- Stock และสถานะสินค้า
-- สมัครสมาชิก / เข้าสู่ระบบ / ออกจากระบบ
-- Wallet / KEN COIN
-- เติมเงินด้วย PromptPay QR หรือโอนธนาคาร
-- อัปโหลดสลิป
-- ประวัติการเติมเงินและประวัติเงิน
-- ซื้อสินค้าด้วย Wallet
-- Coupon / ส่วนลด
-- Order history
-- ดาวน์โหลดไฟล์หลังซื้อ
-- โปรไฟล์สมาชิก
+## ระบบเติมเงินอัตโนมัติ
 
-## ระบบ Admin
-เข้า `/admin`
+ลูกค้าอัปโหลดสลิป → KEN ส่งรูปไป EasySlip → ตรวจสอบว่า:
+- สลิปถูกต้อง
+- ยอดเงินตรงกับยอดที่ลูกค้าแจ้ง
+- สลิปไม่ซ้ำ
+- บัญชีผู้รับตรงกับบัญชีที่ลงทะเบียนไว้ใน EasySlip
 
-- Dashboard: ลูกค้า / สินค้า / Orders / ยอดขาย / รายการเติมเงินรอตรวจ
-- เพิ่ม / แก้ไข / ปิดขาย / ลบสินค้า
-- รูปสินค้า URL หรืออัปโหลดรูป
-- อัปโหลดไฟล์ดิจิทัล
-- สร้างหลายแพ็กเกจและกำหนดราคา/Stock
-- จัดการ Orders
-- คืนเงินเข้า Wallet
-- จัดการสมาชิก
-- เพิ่ม/ลด Wallet พร้อมบันทึกธุรกรรม
-- ตรวจสลิปเติมเงิน
-- อนุมัติ/ปฏิเสธรายการเติมเงิน
-- สร้าง/ปิด Coupon
-- ตั้งค่าชื่อร้าน / ประกาศ / ธนาคาร / เลขบัญชี / QR
-- Health check `/health`
+ถ้าผ่านครบ ระบบจะอนุมัติและเติม KEN COIN ให้อัตโนมัติทันที
+ถ้าไม่ผ่าน รายการจะค้างไว้ให้ Admin ตรวจสอบเอง
 
-## Admin เริ่มต้น
-Email: `admin@ken.local`
-Password: `admin123`
+## ตั้งค่า Railway Variables
 
-ควรตั้ง Railway Variables:
-- `ADMIN_EMAIL`
-- `ADMIN_PASSWORD`
-- `SESSION_SECRET`
+ต้องสร้าง API Key จาก EasySlip Developer Portal แล้วใส่ใน Railway Variables:
 
-## Deploy Railway
-อัปโหลด `server.js` และ `package.json` ไปยัง root ของ GitHub repository แล้วให้ Railway Deploy
+- `EASYSLIP_API_KEY` = API Key ของคุณ
+- `EASYSLIP_MATCH_ACCOUNT` = `true`
+- `EASYSLIP_AUTO_APPROVE` = `true` (ระบบเวอร์ชันนี้ออกแบบให้อนุมัติอัตโนมัติเมื่อผ่านทุกเงื่อนไข)
 
-จากนั้น Service > Settings > Networking > Generate Domain
+EasySlip ใช้ API v2 ที่ endpoint `https://api.easyslip.com/v2/verify/bank` และรองรับตรวจจากรูปสลิปโดยตรง พร้อมตรวจยอดและสลิปซ้ำ
 
-ทดสอบ:
-- `/health`
-- `/`
-- `/admin`
+สำคัญ: ใน EasySlip Developer Portal ต้องลงทะเบียน/เชื่อมบัญชีรับเงินของร้านก่อนเปิด `EASYSLIP_MATCH_ACCOUNT=true` ไม่เช่นนั้นระบบจะไม่ auto-approve เพื่อความปลอดภัย
 
-### สำคัญสำหรับการขายจริง
-ระบบใช้ SQLite และไฟล์อัปโหลด ดังนั้นควรสร้าง Railway Volume แล้วกำหนด:
-- `DATA_DIR=/data`
-- `UPLOAD_DIR=/data/uploads`
+## ข้อจำกัด
 
-และ Mount Path ของ Volume เป็น `/data`
+- EasySlip เป็นบริการภายนอกและต้องมี API Key/โควต้าตามแพ็กเกจของผู้ให้บริการ
+- รูปสลิปที่ส่งให้ระบบตรวจต้องไม่เกิน 4 MB และควรเป็น JPG/PNG/WebP
+- หาก EasySlip ขัดข้องหรือโควต้าหมด ระบบจะไม่เติมเงินอัตโนมัติ แต่เก็บรายการไว้ให้ Admin ตรวจเอง
+- อย่าใส่ API Key ในโค้ด GitHub ให้เก็บใน Railway Variables เท่านั้น
 
-ถ้าไม่ใช้ Volume ข้อมูล SQLite และไฟล์อัปโหลดอาจหายเมื่อ service ถูกสร้างใหม่/redeploy
+## Admin
 
-## หมายเหตุการชำระเงิน
-การเติมเงินผ่านสลิปเป็นการตรวจสอบโดย Admin:
-ลูกค้าโอน > อัปโหลดสลิป > Admin ตรวจ > กดอนุมัติ > ระบบเพิ่ม KEN COIN อัตโนมัติ
+Admin เดิมของระบบใช้ตามค่า `ADMIN_EMAIL` / `ADMIN_PASSWORD` ที่ตั้งไว้ใน Railway
 
-ระบบไม่ได้อ้างว่าเชื่อมธนาคารเพื่อยืนยันยอดแบบอัตโนมัติ เว้นแต่จะเพิ่ม Payment Gateway/API ภายนอกในภายหลัง
+## Run
+
+`npm install`
+`npm start`
+
+
+## ข้อมูลรับเงินปัจจุบัน
+- ธนาคาร: กสิกรไทย
+- ชื่อบัญชี: พงค สุขสะอาด
+- เลขบัญชี: 1691369036
+- ปิดการแสดงและการอัปโหลด PromptPay QR แล้ว
