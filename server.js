@@ -198,7 +198,7 @@ function initDb(){
     db.prepare('INSERT INTO users(name,email,password,role) VALUES(?,?,?,?)')
       .run('KEN Admin',adminEmail,bcrypt.hashSync(adminPassword,12),'admin');
   }else{
-    db.prepare('UPDATE users SET role="admin" WHERE email=?').run(adminEmail);
+    db.prepare("UPDATE users SET role='admin' WHERE email=?").run(adminEmail);
   }
 
   const count=db.prepare('SELECT COUNT(*) c FROM products').get().c;
@@ -446,12 +446,12 @@ app.get('/download/:token',auth,(req,res)=>{
 
 app.get('/admin',admin,(req,res)=>{
   const stats={
-    users:db.prepare('SELECT COUNT(*) c FROM users WHERE role="customer"').get().c,
+    users:db.prepare("SELECT COUNT(*) c FROM users WHERE role='customer'").get().c,
     products:db.prepare('SELECT COUNT(*) c FROM products').get().c,
     orders:db.prepare('SELECT COUNT(*) c FROM orders').get().c,
-    sales:db.prepare('SELECT COALESCE(SUM(amount),0) s FROM orders WHERE status="paid"').get().s,
-    pending:db.prepare('SELECT COUNT(*) c FROM topups WHERE status="pending"').get().c,
-    pendingAmount:db.prepare('SELECT COALESCE(SUM(amount),0) s FROM topups WHERE status="pending"').get().s
+    sales:db.prepare("SELECT COALESCE(SUM(amount),0) s FROM orders WHERE status='paid'").get().s,
+    pending:db.prepare("SELECT COUNT(*) c FROM topups WHERE status='pending'").get().c,
+    pendingAmount:db.prepare("SELECT COALESCE(SUM(amount),0) s FROM topups WHERE status='pending'").get().s
   };
   const recent=db.prepare(`SELECT o.*,u.name,u.email,p.title FROM orders o JOIN users u ON u.id=o.user_id JOIN products p ON p.id=o.product_id ORDER BY o.id DESC LIMIT 10`).all();
   res.send(adminLayout('Admin Dashboard',`<section class="adminsection"><h1>KEN Admin Dashboard</h1><div class="statgrid">
@@ -529,7 +529,7 @@ app.post('/admin/orders/:id/refund',admin,(req,res)=>{
     const o=db.prepare('SELECT * FROM orders WHERE id=?').get(req.params.id); if(!o||o.status!=='paid')throw new Error('Order นี้ไม่สามารถคืนเงินได้');
     db.prepare('UPDATE users SET balance=balance+? WHERE id=?').run(o.amount,o.user_id);
     db.prepare('INSERT INTO wallet_transactions(user_id,amount,type,note,ref_id) VALUES(?,?,?,?,?)').run(o.user_id,o.amount,'refund','คืนเงิน Order #'+o.id,o.id);
-    db.prepare('UPDATE orders SET status="refunded" WHERE id=?').run(o.id);
+    db.prepare("UPDATE orders SET status='refunded' WHERE id=?").run(o.id);
   });
   try{tx();flash(req,'success','คืนเงินเรียบร้อย');}catch(e){flash(req,'error',e.message)}res.redirect('/admin/orders');
 });
@@ -545,7 +545,7 @@ app.post('/admin/users/:id/balance',admin,(req,res)=>{
 });
 
 app.get('/admin/topups',admin,(req,res)=>{
-  const ts=db.prepare('SELECT t.*,u.name,u.email FROM topups t JOIN users u ON u.id=t.user_id ORDER BY CASE WHEN t.status="pending" THEN 0 ELSE 1 END,t.id DESC').all();
+  const ts=db.prepare("SELECT t.*,u.name,u.email FROM topups t JOIN users u ON u.id=t.user_id ORDER BY CASE WHEN t.status='pending' THEN 0 ELSE 1 END,t.id DESC").all();
   res.send(adminLayout('เติมเงิน',`<section class="adminsection"><h1>ตรวจสอบเติมเงิน</h1><div class="tablewrap card"><table><tr><th>#</th><th>ลูกค้า</th><th>ยอด</th><th>สลิป</th><th>สถานะ</th><th>ดำเนินการ</th></tr>${ts.map(t=>`<tr><td>#${t.id}</td><td>${esc(t.name)}<div class="muted">${esc(t.email)}</div></td><td>${money(t.amount)}</td><td>${t.slip_file?`<a class="btn" href="/admin/topups/${t.id}/slip" target="_blank">ดูสลิป</a>`:'-'}</td><td><span class="status ${t.status==='approved'?'green':t.status==='rejected'?'red':'yellow'}">${esc(t.status)}</span></td><td>${t.status==='pending'?`<form method="post" action="/admin/topups/${t.id}" class="flex"><input name="note" placeholder="หมายเหตุ"><button name="action" value="approve" class="btn primary">อนุมัติ</button><button name="action" value="reject" class="btn danger">ปฏิเสธ</button></form>`:esc(t.note||'-')}</td></tr>`).join('')}</table></div></section>`,req));
 });
 app.get('/admin/topups/:id/slip',admin,(req,res)=>{
@@ -561,9 +561,9 @@ app.post('/admin/topups/:id',admin,(req,res)=>{
     if(action==='approve'){
       db.prepare('UPDATE users SET balance=balance+? WHERE id=?').run(t.amount,t.user_id);
       db.prepare('INSERT INTO wallet_transactions(user_id,amount,type,note,ref_id) VALUES(?,?,?,?,?)').run(t.user_id,t.amount,'topup','เติมเงินผ่านสลิป #'+t.id,t.id);
-      db.prepare('UPDATE topups SET status="approved",note=?,reviewed_at=? WHERE id=?').run(note||'อนุมัติ',now(),t.id);
+      db.prepare("UPDATE topups SET status='approved',note=?,reviewed_at=? WHERE id=?").run(note||'อนุมัติ',now(),t.id);
     }else{
-      db.prepare('UPDATE topups SET status="rejected",note=?,reviewed_at=? WHERE id=?').run(note||'ปฏิเสธ',now(),t.id);
+      db.prepare("UPDATE topups SET status='rejected',note=?,reviewed_at=? WHERE id=?").run(note||'ปฏิเสธ',now(),t.id);
     }
   });
   try{tx();flash(req,'success',action==='approve'?'อนุมัติและเพิ่มเครดิตแล้ว':'ปฏิเสธรายการแล้ว')}catch(e){flash(req,'error','ดำเนินการไม่สำเร็จ')}res.redirect('/admin/topups');
