@@ -24,7 +24,7 @@ if(!db.prepare('SELECT COUNT(*) c FROM products').get().c){const i=db.prepare('I
 const css=`*{box-sizing:border-box}body{margin:0;background:#080a12;color:#f5f7ff;font-family:Arial,sans-serif}a{color:inherit;text-decoration:none}.nav{position:sticky;top:0;z-index:5;background:#0e1120cc;backdrop-filter:blur(12px);border-bottom:1px solid #252a42}.navin{max-width:1100px;margin:auto;padding:16px 20px;display:flex;align-items:center;gap:18px}.logo{font-weight:900;font-size:28px;letter-spacing:2px;background:linear-gradient(90deg,#fff,#a66cff);-webkit-background-clip:text;color:transparent}.links{margin-left:auto;display:flex;gap:14px;flex-wrap:wrap}.btn{display:inline-block;border:0;border-radius:12px;padding:11px 16px;background:#7c3cff;color:white;font-weight:700;cursor:pointer}.btn.alt{background:#191e31;border:1px solid #303752}.container{max-width:1100px;margin:auto;padding:28px 20px}.hero{padding:55px 28px;border:1px solid #292f4c;border-radius:26px;background:radial-gradient(circle at 70% 10%,#402070 0,#11152a 38%,#0c0f1c 75%);margin-bottom:28px}.hero h1{font-size:clamp(42px,8vw,78px);margin:0 0 10px}.hero p{color:#aeb6d0;font-size:18px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:18px}.card{background:#111526;border:1px solid #272e49;border-radius:18px;padding:18px}.price{font-size:24px;font-weight:900;color:#b889ff}.muted{color:#8f98b3}.input{width:100%;padding:13px;border-radius:10px;border:1px solid #353d5c;background:#0b0f1b;color:white;margin:7px 0 14px}.table{width:100%;border-collapse:collapse}.table th,.table td{padding:10px;border-bottom:1px solid #2a3048;text-align:left}.qr{width:min(360px,100%);border-radius:14px;background:white;padding:8px}.notice{padding:14px;border-radius:12px;background:#151b2c;margin:12px 0}.danger{background:#3a1720}.success{background:#12351f}.small{font-size:13px}.right{margin-left:auto}@media(max-width:650px){.links{font-size:13px;gap:8px}.navin{align-items:flex-start}.hero{padding:34px 20px}.table{font-size:13px}}
 `;
 function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
-function page(title,body,req){const u=req.session.user;return `<!doctype html><html lang="th"><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} | KEN</title><style>${css}</style></head><body><div class="nav"><div class="navin"><a class="logo" href="/">KEN</a><div class="links"><a href="/shop">สินค้า</a>${u?`<a href="/wallet">Wallet ฿${Number(u.balance||0).toLocaleString()}</a><a href="/orders">คำสั่งซื้อ</a>${u.role==='admin'?'<a href="/admin">หลังบ้าน</a>':''}<form method="post" action="/logout" style="display:inline"><button class="btn alt">ออกจากระบบ</button></form>`:'<a class="btn" href="/login">เข้าสู่ระบบ</a>'}</div></div></div><main class="container">${body}</main></body></html>`}
+function page(title,body,req){const u=req.session.user;return `<!doctype html><html lang="th"><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} | KEN</title><style>${css}</style></head><body><div class="nav"><div class="navin"><a class="logo" href="/">KEN</a><div class="links"><a href="/shop">สินค้า</a>${u?`<a href="/wallet">Wallet ฿${Number(u.balance||0).toLocaleString()}</a><a href="/orders">คำสั่งซื้อ</a>${u.role==='admin'?'<a href="/admin">หลังบ้าน</a><a href="/admin/products">สินค้า</a><a href="/admin/orders">ออเดอร์</a><a href="/admin/users">ลูกค้า</a><a href="/admin/topups">เติมเงิน</a>':''}<form method="post" action="/logout" style="display:inline"><button class="btn alt">ออกจากระบบ</button></form>`:'<a class="btn" href="/login">เข้าสู่ระบบ</a>'}</div></div></div><main class="container">${body}</main></body></html>`}
 function auth(req,res,next){if(!req.session.user)return res.redirect('/login');next()} function admin(req,res,next){if(!req.session.user||req.session.user.role!=='admin')return res.status(403).send('Forbidden');next()}
 app.get('/',(req,res)=>{const ps=db.prepare('SELECT * FROM products ORDER BY featured DESC,id DESC').all();res.send(page('หน้าหลัก',`<section class="hero"><h1>KEN</h1><p>CODE STORE — Source Code • Script • Website • Bot</p><a class="btn" href="/shop">ดูสินค้าทั้งหมด</a></section><h2>สินค้าแนะนำ</h2><div class="grid">${ps.slice(0,6).map(p=>card(p)).join('')}</div>`,req))});
 function card(p){return `<div class="card"><div class="muted">${esc(p.category)}</div><h3>${esc(p.title)}</h3><p class="muted">${esc(p.description)}</p><div class="price">฿${p.price.toLocaleString()}</div>${p.old_price?`<div class="muted"><s>฿${p.old_price.toLocaleString()}</s></div>`:''}<br><a class="btn" href="/product/${esc(p.slug)}">ดูรายละเอียด</a></div>`}
@@ -38,13 +38,166 @@ app.post('/logout',(req,res)=>req.session.destroy(()=>res.redirect('/')));
 app.get('/wallet',auth,(req,res)=>{const u=db.prepare('SELECT * FROM users WHERE id=?').get(req.session.user.id);const ts=db.prepare('SELECT * FROM topups WHERE user_id=? ORDER BY id DESC').all(u.id);const tx=db.prepare('SELECT * FROM wallet_transactions WHERE user_id=? ORDER BY id DESC LIMIT 20').all(u.id);req.session.user.balance=u.balance||0;res.send(page('Wallet',`<h1>Wallet</h1><div class="card"><h2>ยอดเงิน ฿${(u.balance||0).toLocaleString()}</h2></div><div class="card"><h2>เติมเงิน</h2><p class="muted">สแกน QR ด้านล่าง แล้วแนบสลิปเพื่อรอแอดมินตรวจสอบ</p><img class="qr" src="${QR}"><p>ชื่อบัญชีตาม QR ที่ร้านตั้งไว้</p><form method="post" action="/wallet/topup" enctype="multipart/form-data"><input class="input" name="amount" type="number" min="1" placeholder="จำนวนเงิน" required><input class="input" name="slip" type="file" accept="image/*" required><input class="input" name="note" placeholder="หมายเหตุ (ถ้ามี)"><button class="btn">ส่งรายการเติมเงิน</button></form></div><div class="card"><h2>ประวัติเติมเงิน</h2><table class="table"><tr><th>จำนวน</th><th>สถานะ</th></tr>${ts.map(t=>`<tr><td>฿${t.amount.toLocaleString()}</td><td>${esc(t.status)}</td></tr>`).join('')}</table></div><div class="card"><h2>รายการ Wallet</h2><table class="table"><tr><th>จำนวน</th><th>รายการ</th></tr>${tx.map(t=>`<tr><td>${t.amount>0?'+':''}${t.amount.toLocaleString()}</td><td>${esc(t.note)}</td></tr>`).join('')}</table></div>`,req))});
 app.post('/wallet/topup',auth,upload.single('slip'),(req,res)=>{const amount=Math.floor(Number(req.body.amount));if(!amount||amount<1||!req.file)return res.status(400).send('กรุณาระบุจำนวนเงินและแนบสลิป');db.prepare('INSERT INTO topups(user_id,amount,slip_file,note) VALUES(?,?,?,?)').run(req.session.user.id,amount,req.file.filename,req.body.note||'');res.redirect('/wallet')});
 app.post('/order/:id',auth,(req,res)=>{const p=db.prepare('SELECT * FROM products WHERE id=?').get(req.params.id),u=db.prepare('SELECT * FROM users WHERE id=?').get(req.session.user.id);if(!p)return res.status(404).send('Not found');if((u.balance||0)<p.price)return res.redirect('/wallet');const token=crypto.randomBytes(24).toString('hex');const run=db.transaction(()=>{db.prepare('UPDATE users SET balance=balance-? WHERE id=?').run(p.price,u.id);const r=db.prepare('INSERT INTO orders(user_id,product_id,amount,status,download_token) VALUES(?,?,?,?,?)').run(u.id,p.id,p.price,'paid',token);db.prepare('INSERT INTO wallet_transactions(user_id,amount,type,note,ref_id) VALUES(?,?,?,?,?)').run(u.id,-p.price,'purchase','ซื้อ '+p.title,r.lastInsertRowid);return r.lastInsertRowid});run();res.redirect('/orders')});
-app.get('/orders',auth,(req,res)=>{const os=db.prepare('SELECT o.*,p.title FROM orders o JOIN products p ON p.id=o.product_id WHERE o.user_id=? ORDER BY o.id DESC').all(req.session.user.id);res.send(page('คำสั่งซื้อ',`<h1>คำสั่งซื้อของฉัน</h1><div class="grid">${os.map(o=>`<div class="card"><h3>${esc(o.title)}</h3><p>฿${o.amount.toLocaleString()} • ${esc(o.status)}</p>${o.status==='paid'&&o.download_file?`<a class="btn" href="/download/${o.download_token}">ดาวน์โหลด</a>`:''}</div>`).join('')||'<p class="muted">ยังไม่มีคำสั่งซื้อ</p>'}</div>`,req))});
+app.get('/orders',auth,(req,res)=>{const os=db.prepare('SELECT o.*,p.title,p.download_file FROM orders o JOIN products p ON p.id=o.product_id WHERE o.user_id=? ORDER BY o.id DESC').all(req.session.user.id);res.send(page('คำสั่งซื้อ',`<h1>คำสั่งซื้อของฉัน</h1><div class="grid">${os.map(o=>`<div class="card"><h3>${esc(o.title)}</h3><p>฿${o.amount.toLocaleString()} • ${esc(o.status)}</p>${o.status==='paid'&&o.download_file?`<a class="btn" href="/download/${o.download_token}">ดาวน์โหลด</a>`:''}</div>`).join('')||'<p class="muted">ยังไม่มีคำสั่งซื้อ</p>'}</div>`,req))});
 app.get('/download/:token',auth,(req,res)=>{const o=db.prepare('SELECT o.*,p.title,p.download_file FROM orders o JOIN products p ON p.id=o.product_id WHERE o.download_token=? AND o.user_id=? AND o.status="paid"').get(req.params.token,req.session.user.id);if(!o||!o.download_file)return res.status(404).send('ไฟล์สินค้าไม่ได้ตั้งค่าในรายการนี้');const f=path.join('uploads',o.download_file);if(!fs.existsSync(f))return res.status(404).send('ไม่พบไฟล์สินค้า');res.download(f)});
 app.get('/admin',admin,(req,res)=>{const s={users:db.prepare('SELECT COUNT(*) c FROM users WHERE role="customer"').get().c,products:db.prepare('SELECT COUNT(*) c FROM products').get().c,orders:db.prepare('SELECT COUNT(*) c FROM orders').get().c,pending:db.prepare('SELECT COUNT(*) c FROM topups WHERE status="pending"').get().c,revenue:db.prepare('SELECT COALESCE(SUM(amount),0) s FROM orders WHERE status="paid"').get().s};res.send(page('หลังบ้าน',`<h1>KEN Admin</h1><div class="grid"><div class="card"><h3>ลูกค้า</h3><h2>${s.users}</h2></div><div class="card"><h3>สินค้า</h3><h2>${s.products}</h2></div><div class="card"><h3>ออเดอร์</h3><h2>${s.orders}</h2></div><div class="card"><h3>รอตรวจเติมเงิน</h3><h2>${s.pending}</h2></div><div class="card"><h3>ยอดขาย</h3><h2>฿${s.revenue.toLocaleString()}</h2></div></div><br><a class="btn" href="/admin/topups">ตรวจรายการเติมเงิน</a> <a class="btn alt" href="/admin/products">จัดการสินค้า</a>`,req))});
-app.get('/admin/topups',admin,(req,res)=>{const ts=db.prepare('SELECT t.*,u.name,u.email FROM topups t JOIN users u ON u.id=t.user_id ORDER BY t.id DESC').all();res.send(page('ตรวจเติมเงิน',`<h1>ตรวจเติมเงิน</h1><div class="card"><table class="table"><tr><th>ลูกค้า</th><th>ยอด</th><th>สถานะ</th><th>จัดการ</th></tr>${ts.map(t=>`<tr><td>${esc(t.name)}<br><span class="small muted">${esc(t.email)}</span></td><td>฿${t.amount.toLocaleString()}</td><td>${esc(t.status)}</td><td>${t.status==='pending'?`<form method="post" action="/admin/topups/${t.id}" style="display:inline"><input type="hidden" name="status" value="approved"><button class="btn">อนุมัติ</button></form> <form method="post" action="/admin/topups/${t.id}" style="display:inline"><input type="hidden" name="status" value="rejected"><button class="btn alt">ปฏิเสธ</button></form>`:'-'}</td></tr>`).join('')}</table></div>`,req))});
-app.post('/admin/topups/:id',admin,(req,res)=>{const t=db.prepare('SELECT * FROM topups WHERE id=?').get(req.params.id);if(!t||t.status!=='pending')return res.redirect('/admin/topups');if(req.body.status==='approved'){db.transaction(()=>{db.prepare('UPDATE topups SET status="approved",processed_at=CURRENT_TIMESTAMP WHERE id=?').run(t.id);db.prepare('UPDATE users SET balance=balance+? WHERE id=?').run(t.amount,t.user_id);db.prepare('INSERT INTO wallet_transactions(user_id,amount,type,note,ref_id) VALUES(?,?,?,?,?)').run(t.user_id,t.amount,'topup','เติมเงินผ่าน QR',t.id)})();}else db.prepare('UPDATE topups SET status="rejected",processed_at=CURRENT_TIMESTAMP WHERE id=?').run(t.id);res.redirect('/admin/topups')});
-app.get('/admin/products',admin,(req,res)=>{const ps=db.prepare('SELECT * FROM products ORDER BY id DESC').all();res.send(page('สินค้า Admin',`<h1>จัดการสินค้า</h1><div class="card"><form method="post" action="/admin/products" enctype="multipart/form-data"><input class="input" name="title" placeholder="ชื่อสินค้า" required><input class="input" name="category" placeholder="หมวดหมู่" required><input class="input" name="price" type="number" placeholder="ราคา" required><textarea class="input" name="description" placeholder="รายละเอียด"></textarea><input class="input" name="file" type="file"><button class="btn">เพิ่มสินค้า</button></form></div><div class="grid">${ps.map(p=>`<div class="card"><h3>${esc(p.title)}</h3><p>฿${p.price.toLocaleString()}</p></div>`).join('')}</div>`,req))});
-app.post('/admin/products',admin,upload.single('file'),(req,res)=>{const slug=req.body.title.toLowerCase().replace(/[^a-z0-9]+/g,'-')+'-'+Date.now();db.prepare('INSERT INTO products(title,slug,description,category,price,old_price,featured,download_file) VALUES(?,?,?,?,?,?,?,?)').run(req.body.title,slug,req.body.description||'',req.body.category||'Code',Number(req.body.price)||0,0,0,req.file?req.file.filename:null);res.redirect('/admin/products')});
+
+// ===== KEN ADMIN EXTENSIONS =====
+
+// Serve an uploaded payment slip only to admins.
+app.get('/admin/topups/:id/slip',admin,(req,res)=>{
+  const t=db.prepare('SELECT slip_file FROM topups WHERE id=?').get(req.params.id);
+  if(!t || !t.slip_file) return res.status(404).send('ไม่พบสลิป');
+  const f=path.join('uploads',t.slip_file);
+  if(!fs.existsSync(f)) return res.status(404).send('ไม่พบไฟล์สลิป');
+  res.sendFile(path.resolve(f));
+});
+
+// Replace the top-up table with a version that lets admins open the slip.
+app.get('/admin/topups',admin,(req,res)=>{
+  const ts=db.prepare('SELECT t.*,u.name,u.email FROM topups t JOIN users u ON u.id=t.user_id ORDER BY t.id DESC').all();
+  res.send(page('ตรวจเติมเงิน',`<h1>ตรวจเติมเงิน</h1>
+  <div class="card"><table class="table"><tr><th>ลูกค้า</th><th>ยอด</th><th>สลิป</th><th>สถานะ</th><th>จัดการ</th></tr>
+  ${ts.map(t=>`<tr>
+    <td>${esc(t.name)}<br><span class="small muted">${esc(t.email)}</span></td>
+    <td>฿${Number(t.amount).toLocaleString()}</td>
+    <td>${t.slip_file?`<a class="btn alt" target="_blank" href="/admin/topups/${t.id}/slip">ดูสลิป</a>`:'-'}</td>
+    <td>${esc(t.status)}</td>
+    <td>${t.status==='pending'?`<form method="post" action="/admin/topups/${t.id}" style="display:inline"><input type="hidden" name="status" value="approved"><button class="btn">อนุมัติ</button></form>
+    <form method="post" action="/admin/topups/${t.id}" style="display:inline"><input type="hidden" name="status" value="rejected"><button class="btn alt">ปฏิเสธ</button></form>`:'-'}</td>
+  </tr>`).join('')}</table></div>`,req))
+});
+
+
+// Admin: approve/reject top-ups and credit Wallet exactly once.
+app.post('/admin/topups/:id',admin,(req,res)=>{
+  const t=db.prepare('SELECT * FROM topups WHERE id=?').get(req.params.id);
+  if(!t || t.status!=='pending') return res.redirect('/admin/topups');
+  if(req.body.status==='approved'){
+    db.transaction(()=>{
+      db.prepare('UPDATE topups SET status="approved",processed_at=CURRENT_TIMESTAMP WHERE id=? AND status="pending"').run(t.id);
+      db.prepare('UPDATE users SET balance=balance+? WHERE id=?').run(t.amount,t.user_id);
+      db.prepare('INSERT INTO wallet_transactions(user_id,amount,type,note,ref_id) VALUES(?,?,?,?,?)')
+        .run(t.user_id,t.amount,'topup','เติมเงินผ่าน QR',t.id);
+    })();
+  } else if(req.body.status==='rejected'){
+    db.prepare('UPDATE topups SET status="rejected",processed_at=CURRENT_TIMESTAMP WHERE id=? AND status="pending"').run(t.id);
+  }
+  res.redirect('/admin/topups');
+});
+
+// Admin: create product.
+app.post('/admin/products',admin,upload.single('file'),(req,res)=>{
+  const title=(req.body.title||'').trim();
+  if(!title) return res.status(400).send('กรุณาระบุชื่อสินค้า');
+  const baseSlug=title.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') || 'product';
+  const slug=baseSlug+'-'+Date.now();
+  db.prepare(`INSERT INTO products(title,slug,description,category,price,old_price,featured,download_file)
+    VALUES(?,?,?,?,?,?,?,?)`).run(
+      title,slug,req.body.description||'',req.body.category||'Code',
+      Number(req.body.price)||0,Number(req.body.old_price)||0,
+      req.body.featured?1:0,req.file?req.file.filename:null
+    );
+  res.redirect('/admin/products');
+});
+
+// Admin: customer management.
+app.get('/admin/users',admin,(req,res)=>{
+  const us=db.prepare('SELECT id,name,email,role,balance,created_at FROM users ORDER BY id DESC').all();
+  res.send(page('จัดการลูกค้า',`<h1>จัดการลูกค้า</h1>
+  <div class="card"><table class="table"><tr><th>ชื่อ</th><th>อีเมล</th><th>สิทธิ์</th><th>ยอด Wallet</th><th>จัดการ</th></tr>
+  ${us.map(u=>`<tr>
+    <td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>${esc(u.role)}</td><td>฿${Number(u.balance||0).toLocaleString()}</td>
+    <td>${u.role!=='admin'?`<form method="post" action="/admin/users/${u.id}/balance">
+      <input class="input" style="max-width:130px;display:inline-block" name="amount" type="number" placeholder="เพิ่ม/ลด">
+      <input class="input" style="max-width:180px;display:inline-block" name="note" placeholder="หมายเหตุ">
+      <button class="btn">ปรับยอด</button></form>`:'-'}</td>
+  </tr>`).join('')}</table></div>`,req))
+});
+
+app.post('/admin/users/:id/balance',admin,(req,res)=>{
+  const amount=Math.trunc(Number(req.body.amount));
+  const u=db.prepare('SELECT id FROM users WHERE id=?').get(req.params.id);
+  if(!u || !Number.isFinite(amount) || amount===0) return res.redirect('/admin/users');
+  db.transaction(()=>{
+    db.prepare('UPDATE users SET balance=balance+? WHERE id=?').run(amount,u.id);
+    db.prepare('INSERT INTO wallet_transactions(user_id,amount,type,note,ref_id) VALUES(?,?,?,?,?)')
+      .run(u.id,amount,'admin_adjust',req.body.note||'ปรับยอดโดยแอดมิน',null);
+  })();
+  res.redirect('/admin/users');
+});
+
+// Admin: order management.
+app.get('/admin/orders',admin,(req,res)=>{
+  const os=db.prepare(`SELECT o.*,u.name,u.email,p.title
+    FROM orders o JOIN users u ON u.id=o.user_id JOIN products p ON p.id=o.product_id
+    ORDER BY o.id DESC`).all();
+  res.send(page('จัดการออเดอร์',`<h1>จัดการออเดอร์</h1>
+  <div class="card"><table class="table"><tr><th>#</th><th>ลูกค้า</th><th>สินค้า</th><th>ยอด</th><th>สถานะ</th><th>วันที่</th></tr>
+  ${os.map(o=>`<tr><td>${o.id}</td><td>${esc(o.name)}<br><span class="small muted">${esc(o.email)}</span></td>
+  <td>${esc(o.title)}</td><td>฿${Number(o.amount).toLocaleString()}</td><td>${esc(o.status)}</td><td>${esc(o.created_at)}</td></tr>`).join('')}</table></div>`,req))
+});
+
+// Admin: edit/delete products.
+app.get('/admin/products/:id/edit',admin,(req,res)=>{
+  const p=db.prepare('SELECT * FROM products WHERE id=?').get(req.params.id);
+  if(!p) return res.status(404).send('ไม่พบสินค้า');
+  res.send(page('แก้ไขสินค้า',`<h1>แก้ไขสินค้า</h1><div class="card">
+  <form method="post" action="/admin/products/${p.id}/edit" enctype="multipart/form-data">
+  <input class="input" name="title" value="${esc(p.title)}" placeholder="ชื่อสินค้า" required>
+  <input class="input" name="category" value="${esc(p.category||'')}" placeholder="หมวดหมู่" required>
+  <input class="input" name="price" type="number" value="${Number(p.price)||0}" placeholder="ราคา" required>
+  <input class="input" name="old_price" type="number" value="${Number(p.old_price)||0}" placeholder="ราคาปกติ">
+  <textarea class="input" name="description" placeholder="รายละเอียด">${esc(p.description||'')}</textarea>
+  <label><input type="checkbox" name="featured" ${p.featured?'checked':''}> สินค้าแนะนำ</label>
+  <p class="muted small">ไฟล์เดิม: ${p.download_file?'มีไฟล์แล้ว':'ยังไม่มีไฟล์'}</p>
+  <input class="input" name="file" type="file">
+  <button class="btn">บันทึก</button> <a class="btn alt" href="/admin/products">ยกเลิก</a>
+  </form></div>`,req))
+});
+
+app.post('/admin/products/:id/edit',admin,upload.single('file'),(req,res)=>{
+  const p=db.prepare('SELECT * FROM products WHERE id=?').get(req.params.id);
+  if(!p) return res.status(404).send('ไม่พบสินค้า');
+  const title=req.body.title||p.title;
+  const slug=title.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')+'-'+p.id;
+  const fileName=req.file ? req.file.filename : p.download_file;
+  db.prepare(`UPDATE products SET title=?,slug=?,description=?,category=?,price=?,old_price=?,featured=?,download_file=? WHERE id=?`)
+    .run(title,slug,req.body.description||'',req.body.category||'Code',Number(req.body.price)||0,Number(req.body.old_price)||0,req.body.featured?1:0,fileName,p.id);
+  res.redirect('/admin/products');
+});
+
+app.post('/admin/products/:id/delete',admin,(req,res)=>{
+  const p=db.prepare('SELECT * FROM products WHERE id=?').get(req.params.id);
+  if(!p) return res.redirect('/admin/products');
+  const used=db.prepare('SELECT COUNT(*) c FROM orders WHERE product_id=?').get(p.id).c;
+  if(used>0) return res.status(400).send(page('ลบสินค้า',`<div class="notice danger">สินค้านี้มีออเดอร์แล้ว จึงไม่ให้ลบเพื่อรักษาประวัติการขาย</div><a class="btn" href="/admin/products">กลับ</a>`,req));
+  db.prepare('DELETE FROM products WHERE id=?').run(p.id);
+  if(p.download_file){try{fs.unlinkSync(path.join('uploads',p.download_file))}catch(e){}}
+  res.redirect('/admin/products');
+});
+
+// Improved product management page with edit/delete controls.
+app.get('/admin/products',admin,(req,res)=>{
+  const ps=db.prepare('SELECT * FROM products ORDER BY id DESC').all();
+  res.send(page('สินค้า Admin',`<h1>จัดการสินค้า</h1>
+  <div class="card"><h2>เพิ่มสินค้า</h2><form method="post" action="/admin/products" enctype="multipart/form-data">
+  <input class="input" name="title" placeholder="ชื่อสินค้า" required>
+  <input class="input" name="category" placeholder="หมวดหมู่" required>
+  <input class="input" name="price" type="number" placeholder="ราคาขาย" required>
+  <input class="input" name="old_price" type="number" placeholder="ราคาปกติ">
+  <textarea class="input" name="description" placeholder="รายละเอียด"></textarea>
+  <label><input type="checkbox" name="featured"> สินค้าแนะนำ</label>
+  <input class="input" name="file" type="file">
+  <button class="btn">เพิ่มสินค้า</button></form></div>
+  <div class="grid">${ps.map(p=>`<div class="card"><div class="muted">${esc(p.category)}</div><h3>${esc(p.title)}</h3>
+  <p>${esc(p.description||'')}</p><div class="price">฿${Number(p.price).toLocaleString()}</div>
+  <p class="small muted">${p.download_file?'มีไฟล์ดาวน์โหลด':'ยังไม่มีไฟล์'}</p>
+  <a class="btn" href="/admin/products/${p.id}/edit">แก้ไข</a>
+  <form method="post" action="/admin/products/${p.id}/delete" style="display:inline" onsubmit="return confirm('ลบสินค้านี้?')">
+  <button class="btn alt">ลบ</button></form></div>`).join('')}</div>`,req))
+});
+
 app.get('/health',(req,res)=>res.json({ok:true,service:'KEN Code Store'}));
-app.use((e,req,res,next)=>{if(e&&e.code==='LIMIT_FILE_SIZE')return res.status(413).send('ไฟล์ใหญ่เกิน 25MB');res.status(500).send('Server error')});
+app.use((e,req,res,next)=>{console.error('KEN ERROR',e&&e.stack?e.stack:e);if(e&&e.code==='LIMIT_FILE_SIZE')return res.status(413).send('ไฟล์ใหญ่เกิน 25MB');res.status(500).send('Server error')});
 app.listen(PORT,()=>console.log('KEN Code Store listening on '+PORT));
