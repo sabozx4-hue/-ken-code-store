@@ -462,6 +462,18 @@ app.get('/admin',admin,(req,res)=>{
 });
 
 function productForm(p={},vars=[]){
+  const rows=(vars.length?vars:[{name:'Standard',price:Number(p.price||0),old_price:Number(p.old_price||0),stock:Number(p.stock||0)}]);
+  const variantRows=rows.map((v,i)=>`<div class="variant-row card" data-variant-row style="padding:14px;margin:10px 0;background:#0f0f12;border:1px solid #27272d">
+    <div class="between" style="gap:10px;align-items:center"><b>แพ็กเกจที่ ${i+1}</b><button type="button" class="btn danger" onclick="this.closest('[data-variant-row]').remove();renumberVariants()">ลบ</button></div>
+    <div class="row">
+      <div class="field"><label>ชื่อแพ็กเกจ</label><input name="variant_name[]" value="${esc(v.name||'')}" placeholder="เช่น 7 วัน" required></div>
+      <div class="field"><label>ราคาขาย (บาท)</label><input type="number" name="variant_price[]" value="${Number(v.price||0)}" min="0" required></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>ราคาเดิม (บาท)</label><input type="number" name="variant_old_price[]" value="${Number(v.old_price||0)}" min="0"></div>
+      <div class="field"><label>Stock</label><input type="number" name="variant_stock[]" value="${Number(v.stock||0)}" min="0" required></div>
+    </div>
+  </div>`).join('');
   return `<form class="card" style="padding:20px" method="post" enctype="multipart/form-data">
   <div class="row"><div class="field"><label>ชื่อสินค้า</label><input name="title" value="${esc(p.title||'')}" required></div><div class="field"><label>Slug</label><input name="slug" value="${esc(p.slug||'')}"><small class="muted">เว้นว่างให้สร้างอัตโนมัติ</small></div></div>
   <div class="row"><div class="field"><label>หมวด</label><input name="category" value="${esc(p.category||'ทั่วไป')}"></div><div class="field"><label>สถานะ</label><select name="status"><option ${p.status==='พร้อมขาย'?'selected':''}>พร้อมขาย</option><option ${p.status==='กำลังอัปเดต'?'selected':''}>กำลังอัปเดต</option><option ${p.status==='ปิดปรับปรุง'?'selected':''}>ปิดปรับปรุง</option></select></div></div>
@@ -470,9 +482,23 @@ function productForm(p={},vars=[]){
   <div class="field"><label>รูปสินค้า URL (หรืออัปโหลดด้านล่าง)</label><input name="image_url" value="${esc(p.image_url||'')}"></div><div class="field"><label>อัปโหลดรูปสินค้า</label><input type="file" name="image" accept="image/*"></div>
   <div class="field"><label>ไฟล์สินค้าดิจิทัล ${p.download_file?`<span class="muted">ปัจจุบัน: ${esc(p.download_file)}</span>`:''}</label><input type="file" name="file"></div>
   <div class="row"><div class="field"><label>Stock รวม</label><input type="number" name="stock" value="${Number(p.stock||0)}" min="0"></div><div class="field"><label><input type="checkbox" name="featured" ${p.featured?'checked':''}> สินค้าแนะนำ</label><label><input type="checkbox" name="active" ${p.active===0?'':'checked'}> เปิดขาย</label></div></div>
-  <h3>แพ็กเกจ / Variants</h3><p class="muted small">ใส่ 1 แพ็กเกจต่อ 1 บรรทัด: ชื่อ|ราคา|ราคาเดิม|stock เช่น Standard|1290|1990|10</p>
-  <textarea name="variants" placeholder="Standard|1290|1990|10">${vars.map(v=>`${v.name}|${v.price}|${v.old_price||0}|${v.stock}`).join('\n')}</textarea>
-  <div class="actions"><button class="btn primary">บันทึกสินค้า</button><a class="btn" href="/admin/products">ยกเลิก</a></div></form>`;
+  <h3>แพ็กเกจสินค้า</h3><p class="muted small">เพิ่มแต่ละตัวเลือกแยกกันได้ เช่น 12 ชม., 1 วัน, 7 วัน, 30 วัน, ตลอดชีพ</p>
+  <div id="variant-list">${variantRows}</div>
+  <div class="actions"><button type="button" class="btn purple" onclick="addVariantRow()">＋ เพิ่มแพ็กเกจ</button></div>
+  <div class="actions"><button class="btn primary">บันทึกสินค้า</button><a class="btn" href="/admin/products">ยกเลิก</a></div>
+  </form>
+  <script>
+    function renumberVariants(){document.querySelectorAll('[data-variant-row]').forEach((r,i)=>{const b=r.querySelector('b');if(b)b.textContent='แพ็กเกจที่ '+(i+1);});}
+    function addVariantRow(){
+      const list=document.getElementById('variant-list');
+      const n=list.querySelectorAll('[data-variant-row]').length+1;
+      const row=document.createElement('div'); row.className='variant-row card'; row.setAttribute('data-variant-row',''); row.style='padding:14px;margin:10px 0;background:#0f0f12;border:1px solid #27272d';
+      row.innerHTML='<div class="between" style="gap:10px;align-items:center"><b>แพ็กเกจที่ '+n+'</b><button type="button" class="btn danger" onclick="this.closest(\'[data-variant-row]\').remove();renumberVariants()">ลบ</button></div>'+
+      '<div class="row"><div class="field"><label>ชื่อแพ็กเกจ</label><input name="variant_name[]" placeholder="เช่น 7 วัน" required></div><div class="field"><label>ราคาขาย (บาท)</label><input type="number" name="variant_price[]" value="0" min="0" required></div></div>'+
+      '<div class="row"><div class="field"><label>ราคาเดิม (บาท)</label><input type="number" name="variant_old_price[]" value="0" min="0"></div><div class="field"><label>Stock</label><input type="number" name="variant_stock[]" value="0" min="0" required></div></div>';
+      list.appendChild(row);
+    }
+  </script>`;
 }
 app.get('/admin/products',admin,(req,res)=>{
   const ps=db.prepare('SELECT * FROM products ORDER BY id DESC').all();
@@ -500,10 +526,14 @@ function saveProduct(req,id=null){
         .run(title,slug,b.description||'',b.category||'ทั่วไป',price,old,stock,imageUrl,file?file.filename:'',featured,active,status);
       pid=r.lastInsertRowid;
     }
-    const lines=String(b.variants||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+    const names=Array.isArray(b.variant_name)?b.variant_name:(b.variant_name?[b.variant_name]:[]);
+    const prices=Array.isArray(b.variant_price)?b.variant_price:(b.variant_price?[b.variant_price]:[]);
+    const olds=Array.isArray(b.variant_old_price)?b.variant_old_price:(b.variant_old_price?[b.variant_old_price]:[]);
+    const stocks=Array.isArray(b.variant_stock)?b.variant_stock:(b.variant_stock?[b.variant_stock]:[]);
     const ins=db.prepare('INSERT INTO product_variants(product_id,name,price,old_price,stock) VALUES(?,?,?,?,?)');
-    if(lines.length) lines.forEach(line=>{const a=line.split('|');ins.run(pid,a[0].trim(),Math.max(0,Math.trunc(Number(a[1])||0)),Math.max(0,Math.trunc(Number(a[2])||0)),Math.max(0,Math.trunc(Number(a[3])||0)));});
-    else ins.run(pid,'Standard',price,old,stock);
+    let count=0;
+    names.forEach((name,i)=>{const n=String(name||'').trim();if(!n)return;ins.run(pid,n,Math.max(0,Math.trunc(Number(prices[i])||0)),Math.max(0,Math.trunc(Number(olds[i])||0)),Math.max(0,Math.trunc(Number(stocks[i])||0)));count++;});
+    if(!count) ins.run(pid,'Standard',price,old,stock);
   });
   tx(); return pid;
 }
