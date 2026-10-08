@@ -172,7 +172,27 @@ function initDb(){
     name TEXT UNIQUE NOT NULL,
     active INTEGER NOT NULL DEFAULT 1
   );
+  CREATE TABLE IF NOT EXISTS reseller_keys(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE NOT NULL,
+    discount_percent INTEGER NOT NULL DEFAULT 40,
+    max_uses INTEGER NOT NULL DEFAULT 0,
+    used_count INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    expires_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS user_reseller_keys(
+    user_id INTEGER PRIMARY KEY,
+    key_id INTEGER NOT NULL,
+    activated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(key_id) REFERENCES reseller_keys(id)
+  );
   `);
+  const orderCols=db.prepare('PRAGMA table_info(orders)').all().map(x=>x.name);
+  if(!orderCols.includes('reseller_key_id')) db.exec('ALTER TABLE orders ADD COLUMN reseller_key_id INTEGER');
+  if(!orderCols.includes('reseller_discount_percent')) db.exec('ALTER TABLE orders ADD COLUMN reseller_discount_percent INTEGER NOT NULL DEFAULT 0');
 
   const settings = {
     store_name:'KEN CODE STORE',
@@ -217,6 +237,23 @@ initDb();
 
 function setting(key, fallback=''){const r=db.prepare('SELECT value FROM settings WHERE key=?').get(key);return r?r.value:fallback;}
 function setSetting(key,value){db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key,value);}
+function activeResellerForUser(userId){
+  if(!userId) return null;
+  const r=db.prepare('SELECT k.*,urk.activated_at FROM user_reseller_keys urk JOIN reseller_keys k ON k.id=urk.key_id WHERE urk.user_id=?').get(userId);
+  if(!r || !r.active) return null;
+  if(r.expires_at && new Date(r.expires_at)<new Date()) return null;
+  if(r.max_uses>0 && r.used_count>=r.max_uses) return null;
+  return r;
+}
+function resellerPrice(price,userId){
+  const key=activeResellerForUser(userId);
+  if(!key) return {price:Number(price),key:null,discount:0};
+  const discount=Math.max(0,Math.min(90,Number(key.discount_percent)||0));
+  return {price:Math.max(0,Math.floor(Number(price)*(100-discount)/100)),key,discount};
+}
+function generateResellerCode(){
+  let code=''; do{code='KEN-REP-'+crypto.randomBytes(5).toString('hex').toUpperCase();}while(db.prepare('SELECT 1 FROM reseller_keys WHERE code=?').get(code)); return code;
+}
 function publicProduct(p){
   const vars=db.prepare('SELECT * FROM product_variants WHERE product_id=? AND active=1 ORDER BY id').all(p.id);
   return {...p,variants:vars};
@@ -284,7 +321,7 @@ function adminLayout(title,body,req){
   return page(title,`
     <div class="adminnav">
       <a href="/admin">Dashboard</a><a href="/admin/products">สินค้า</a><a href="/admin/orders">Orders</a>
-      <a href="/admin/users">ลูกค้า</a><a href="/admin/topups">เติมเงิน</a><a href="/admin/coupons">คูปอง</a>
+      <a href="/admin/users">ลูกค้า</a><a href="/admin/topups">เติมเงิน</a><a href="/admin/coupons">คูปอง</a><a href="/admin/reseller-keys">คีย์ตัวแทน</a>
       <a href="/admin/settings">ตั้งค่า</a><a href="/">ดูหน้าร้าน</a>
     </div>${body}`,req);
 }
@@ -334,10 +371,11 @@ app.get('/product/:slug',(req,res)=>{
   if(!vars.length) vars.push({id:0,name:'Standard',price:p.price,old_price:p.old_price,stock:p.stock,active:1});
   res.send(page(p.title,`<section class="detail"><div class="card detailimg"><div class="thumb" style="height:100%;min-height:350px">${p.image_url?`<img src="${esc(p.image_url)}" alt="">`:`<div class="placeholder">KEN</div>`}</div></div>
   <div class="card detailbox"><div class="muted">${esc(p.category)}</div><h1>${esc(p.title)}</h1><p class="muted">${esc(p.description)}</p>
+  ${(()=>{const rk=activeResellerForUser(req.session.user?.id);return rk?`<div class="alert success">🏷️ ราคาตัวแทนเปิดใช้งานอยู่ — ลด ${rk.discount_percent}%</div>`:''})()}
   <form method="post" action="/buy">
   <input type="hidden" name="product_id" value="${p.id}">
   <h3>เลือกแพ็กเกจ</h3>
-  ${vars.map((v,i)=>`<label class="variant ${i===0?'selected':''}" onclick="document.querySelectorAll('.variant').forEach(x=>x.classList.remove('selected'));this.classList.add('selected')"><span><input type="radio" name="variant_id" value="${v.id}" ${i===0?'checked':''}> ${esc(v.name)}<br><small class="muted">${v.stock>0?'เหลือ '+v.stock+' ชิ้น':'หมด'}</small></span><span><b>${money(v.price)}</b>${v.old_price?`<br><small class="old">${money(v.old_price)}</small>`:''}</span></label>`).join('')}
+  ${vars.map((v,i)=>{const rp=resellerPrice(v.price,req.session.user?.id);return `<label class="variant ${i===0?'selected':''}" onclick="document.querySelectorAll('.variant').forEach(x=>x.classList.remove('selected'));this.classList.add('selected')"><span><input type="radio" name="variant_id" value="${v.id}" ${i===0?'checked':''}> ${esc(v.name)}<br><small class="muted">${v.stock>0?'เหลือ '+v.stock+' ชิ้น':'หมด'}</small></span><span style="text-align:right"><b>${money(rp.price)}</b>${rp.key?` <span class="status green">-${rp.discount}%</span>`:''}${v.old_price?`<br><small class="old">${money(v.old_price)}</small>`:''}</span></label>`;}).join('')}
   <div class="field"><label>โค้ดส่วนลด (ถ้ามี)</label><input name="coupon" placeholder="KEN10"></div>
   <button class="btn primary full" ${vars.every(v=>v.stock<=0)?'disabled':''}>🛒 ซื้อด้วย KEN COIN</button>
   </form>
@@ -369,8 +407,24 @@ app.get('/account',auth,(req,res)=>{
   <a href="/shop">🛍️ ร้านค้า</a><a href="/topup">💳 เติมเงิน</a><a href="/orders">🧾 ประวัติการซื้อ</a><a href="/transactions">📜 ประวัติเงิน</a><a href="/profile">👤 โปรไฟล์</a>${u.role==='admin'?'<a href="/admin">⚙️ Admin</a>':''}<a href="/logout" style="color:#ff737c">↪ ออกจากระบบ</a></aside>
   <section><h1>สวัสดี ${esc(u.name)} 👋</h1><p class="muted">จัดการบัญชีและรายการของคุณจากหน้านี้</p>
   <div class="statgrid"><div class="stat">ยอดเงิน<b>${money(u.balance)}</b></div><div class="stat">คำสั่งซื้อ<b>${db.prepare('SELECT COUNT(*) c FROM orders WHERE user_id=?').get(u.id).c}</b></div></div>
+  ${(()=>{const rk=activeResellerForUser(u.id);return `<div class="card" style="padding:18px;margin:18px 0;border-color:#5d32d9"><div class="between"><div><b>🏷️ ราคาตัวแทน</b><div class="muted small">ใส่คีย์ตัวแทนเพื่อรับส่วนลดจากราคาปกติ</div></div>${rk?`<span class="status green">เปิดใช้งาน -${rk.discount_percent}%</span>`:''}</div><form method="post" action="/reseller-key" class="flex" style="margin-top:12px"><input name="code" value="${rk?esc(rk.code):''}" placeholder="KEN-REP-XXXXXX" required style="flex:1;background:#101012;color:#fff;border:1px solid #29292e;border-radius:13px;padding:13px"><button class="btn purple">${rk?'เปลี่ยนคีย์':'ใช้คีย์ตัวแทน'}</button></form></div>`})()}
   <div class="section"><div class="sectionhead"><h2>รายการซื้อล่าสุด</h2><a href="/orders">ทั้งหมด →</a></div><div class="list">${orders.length?orders.map(o=>`<div class="listitem between"><div><b>${esc(o.title)}</b><div class="muted small">${esc(o.variant_name)} · ${new Date(o.created_at).toLocaleString('th-TH')}</div></div><div><b>${money(o.amount)}</b><br>${o.status==='paid'?`<a class="small" href="/download/${esc(o.download_token)}">ดาวน์โหลด</a>`:esc(o.status)}</div></div>`).join(''):'ยังไม่มีรายการซื้อ'}</div></div>
   </section></section>`,req));
+});
+
+app.post('/reseller-key',auth,(req,res)=>{
+  const code=String(req.body.code||'').trim().toUpperCase();
+  const k=db.prepare('SELECT * FROM reseller_keys WHERE code=?').get(code);
+  if(!k||!k.active){flash(req,'error','ไม่พบคีย์ตัวแทน หรือคีย์ถูกปิดใช้งาน');return res.redirect('/account');}
+  if(k.expires_at && new Date(k.expires_at)<new Date()){flash(req,'error','คีย์ตัวแทนหมดอายุแล้ว');return res.redirect('/account');}
+  if(k.max_uses>0 && k.used_count>=k.max_uses){flash(req,'error','คีย์ตัวแทนถูกใช้งานครบจำนวนแล้ว');return res.redirect('/account');}
+  const old=db.prepare('SELECT key_id FROM user_reseller_keys WHERE user_id=?').get(req.user.id);
+  try{db.transaction(()=>{
+    if(old && old.key_id!==k.id) db.prepare('UPDATE reseller_keys SET used_count=CASE WHEN used_count>0 THEN used_count-1 ELSE 0 END WHERE id=?').run(old.key_id);
+    db.prepare('INSERT INTO user_reseller_keys(user_id,key_id,activated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET key_id=excluded.key_id,activated_at=excluded.activated_at').run(req.user.id,k.id,now());
+    if(!old || old.key_id!==k.id) db.prepare('UPDATE reseller_keys SET used_count=used_count+1 WHERE id=?').run(k.id);
+  })(); flash(req,'success',`เปิดราคาตัวแทนแล้ว ลด ${k.discount_percent}%`);}catch(e){flash(req,'error','เปิดใช้คีย์ไม่สำเร็จ');}
+  res.redirect('/account');
 });
 
 app.get('/topup',auth,(req,res)=>{
@@ -389,7 +443,7 @@ app.post('/topup',auth,upload.single('slip'),(req,res)=>{
 
 app.get('/orders',auth,(req,res)=>{
   const os=db.prepare(`SELECT o.*,p.title,COALESCE(v.name,'Standard') variant_name FROM orders o JOIN products p ON p.id=o.product_id LEFT JOIN product_variants v ON v.id=o.variant_id WHERE o.user_id=? ORDER BY o.id DESC`).all(req.user.id);
-  res.send(page('ประวัติการซื้อ',`<section class="section"><h1>ประวัติการซื้อ</h1><div class="tablewrap card"><table><thead><tr><th>สินค้า</th><th>แพ็กเกจ</th><th>ราคา</th><th>สถานะ</th><th>วันที่</th><th></th></tr></thead><tbody>${os.map(o=>`<tr><td>${esc(o.title)}</td><td>${esc(o.variant_name)}</td><td>${money(o.amount)}</td><td><span class="status green">${esc(o.status)}</span></td><td>${new Date(o.created_at).toLocaleString('th-TH')}</td><td>${o.download_token?`<a class="btn" href="/download/${esc(o.download_token)}">ดาวน์โหลด</a>`:''}</td></tr>`).join('')}</tbody></table></div></section>`,req));
+  res.send(page('ประวัติการซื้อ',`<section class="section"><h1>ประวัติการซื้อ</h1><div class="tablewrap card"><table><thead><tr><th>สินค้า</th><th>แพ็กเกจ</th><th>ราคา</th><th>ตัวแทน</th><th>สถานะ</th><th>วันที่</th><th></th></tr></thead><tbody>${os.map(o=>`<tr><td>${esc(o.title)}</td><td>${esc(o.variant_name)}</td><td>${money(o.amount)}</td><td>${o.reseller_key_id?`<span class="status green">-${o.reseller_discount_percent}%</span>`:'-'}</td><td><span class="status green">${esc(o.status)}</span></td><td>${new Date(o.created_at).toLocaleString('th-TH')}</td><td>${o.download_token?`<a class="btn" href="/download/${esc(o.download_token)}">ดาวน์โหลด</a>`:''}</td></tr>`).join('')}</tbody></table></div></section>`,req));
 });
 app.get('/transactions',auth,(req,res)=>{
   const ts=db.prepare('SELECT * FROM wallet_transactions WHERE user_id=? ORDER BY id DESC LIMIT 100').all(req.user.id);
@@ -416,19 +470,21 @@ app.post('/buy',auth,(req,res)=>{
   const vid=Number(req.body.variant_id||0);
   let v=vid?db.prepare('SELECT * FROM product_variants WHERE id=? AND product_id=? AND active=1').get(vid,p.id):null;
   if(!v)v=db.prepare('SELECT * FROM product_variants WHERE product_id=? AND active=1 ORDER BY id LIMIT 1').get(p.id);
-  const price=v?Number(v.price):Number(p.price), stock=v?Number(v.stock):Number(p.stock);
+  const basePrice=v?Number(v.price):Number(p.price), stock=v?Number(v.stock):Number(p.stock);
   if(stock<=0){flash(req,'error','สินค้าหมด');return res.redirect('/product/'+p.slug);}
-  const ci=couponInfo(req.body.coupon,req.user.id,price);
+  const rp=resellerPrice(basePrice,req.user.id);
+  if(rp.key && String(req.body.coupon||'').trim()){flash(req,'error','ราคาตัวแทนไม่สามารถใช้คูปองส่วนลดร่วมกันได้');return res.redirect('/product/'+p.slug);}
+  const ci=couponInfo(req.body.coupon,req.user.id,rp.price);
   if(ci.error){flash(req,'error',ci.error);return res.redirect('/product/'+p.slug);}
-  const total=Math.max(0,price-ci.discount);
+  const total=Math.max(0,rp.price-ci.discount);
   const tx=db.transaction(()=>{
     const u=db.prepare('SELECT balance FROM users WHERE id=?').get(req.user.id);
     if(u.balance<total) throw new Error('เงินใน Wallet ไม่พอ');
     db.prepare('UPDATE users SET balance=balance-? WHERE id=?').run(total,req.user.id);
     if(v) db.prepare('UPDATE product_variants SET stock=stock-1 WHERE id=? AND stock>0').run(v.id);
     db.prepare('UPDATE products SET stock=CASE WHEN stock>0 THEN stock-1 ELSE 0 END WHERE id=?').run(p.id);
-    const ord=db.prepare('INSERT INTO orders(user_id,product_id,variant_id,coupon_id,amount,status,download_token) VALUES(?,?,?,?,?,?,?)')
-      .run(req.user.id,p.id,v?.id||null,ci.coupon?.id||null,total,'paid',token());
+    const ord=db.prepare('INSERT INTO orders(user_id,product_id,variant_id,coupon_id,amount,status,download_token,reseller_key_id,reseller_discount_percent) VALUES(?,?,?,?,?,?,?,?,?)')
+      .run(req.user.id,p.id,v?.id||null,ci.coupon?.id||null,total,'paid',token(),rp.key?.id||null,rp.discount||0);
     db.prepare('INSERT INTO wallet_transactions(user_id,amount,type,note,ref_id) VALUES(?,?,?,?,?)')
       .run(req.user.id,-total,'purchase','ซื้อ '+p.title,ord.lastInsertRowid);
     if(ci.coupon) {db.prepare('UPDATE coupons SET used_count=used_count+1 WHERE id=?').run(ci.coupon.id);db.prepare('INSERT INTO coupon_uses(coupon_id,user_id,order_id) VALUES(?,?,?)').run(ci.coupon.id,req.user.id,ord.lastInsertRowid);}
@@ -552,7 +608,7 @@ app.post('/admin/products/:id/delete',admin,(req,res)=>{
 
 app.get('/admin/orders',admin,(req,res)=>{
   const os=db.prepare(`SELECT o.*,u.name,u.email,p.title,COALESCE(v.name,'Standard') variant_name FROM orders o JOIN users u ON u.id=o.user_id JOIN products p ON p.id=o.product_id LEFT JOIN product_variants v ON v.id=o.variant_id ORDER BY o.id DESC`).all();
-  res.send(adminLayout('Orders',`<section class="adminsection"><h1>จัดการ Orders</h1><div class="tablewrap card"><table><tr><th>#</th><th>ลูกค้า</th><th>สินค้า</th><th>ยอด</th><th>สถานะ</th><th>วันที่</th><th></th></tr>${os.map(o=>`<tr><td>#${o.id}</td><td>${esc(o.name)}<div class="muted">${esc(o.email)}</div></td><td>${esc(o.title)}<div class="muted">${esc(o.variant_name)}</div></td><td>${money(o.amount)}</td><td><span class="status green">${esc(o.status)}</span></td><td>${new Date(o.created_at).toLocaleString('th-TH')}</td><td>${o.status==='paid'?`<form method="post" action="/admin/orders/${o.id}/refund" onsubmit="return confirm('คืนเงินให้ลูกค้า?')"><button class="btn danger">คืนเงิน</button></form>`:''}</td></tr>`).join('')}</table></div></section>`,req));
+  res.send(adminLayout('Orders',`<section class="adminsection"><h1>จัดการ Orders</h1><div class="tablewrap card"><table><tr><th>#</th><th>ลูกค้า</th><th>สินค้า</th><th>ยอด</th><th>ตัวแทน</th><th>สถานะ</th><th>วันที่</th><th></th></tr>${os.map(o=>`<tr><td>#${o.id}</td><td>${esc(o.name)}<div class="muted">${esc(o.email)}</div></td><td>${esc(o.title)}<div class="muted">${esc(o.variant_name)}</div></td><td>${money(o.amount)}</td><td>${o.reseller_key_id?`<span class="status green">-${o.reseller_discount_percent}%</span>`:'-'}</td><td><span class="status green">${esc(o.status)}</span></td><td>${new Date(o.created_at).toLocaleString('th-TH')}</td><td>${o.status==='paid'?`<form method="post" action="/admin/orders/${o.id}/refund" onsubmit="return confirm('คืนเงินให้ลูกค้า?')"><button class="btn danger">คืนเงิน</button></form>`:''}</td></tr>`).join('')}</table></div></section>`,req));
 });
 app.post('/admin/orders/:id/refund',admin,(req,res)=>{
   const tx=db.transaction(()=>{
@@ -607,6 +663,23 @@ app.post('/admin/coupons',admin,(req,res)=>{
   try{db.prepare('INSERT INTO coupons(code,type,value,max_uses,min_amount,expires_at) VALUES(?,?,?,?,?,?)').run(String(req.body.code||'').trim().toUpperCase(),req.body.type,Math.max(0,Number(req.body.value)||0),Math.max(0,Number(req.body.max_uses)||0),Math.max(0,Number(req.body.min_amount)||0),req.body.expires_at||null);flash(req,'success','สร้างคูปองแล้ว')}catch(e){flash(req,'error','สร้างคูปองไม่ได้: code อาจซ้ำ')}res.redirect('/admin/coupons');
 });
 app.post('/admin/coupons/:id/toggle',admin,(req,res)=>{db.prepare('UPDATE coupons SET active=CASE active WHEN 1 THEN 0 ELSE 1 END WHERE id=?').run(req.params.id);redirectBack(req,res,'/admin/coupons');});
+
+app.get('/admin/reseller-keys',admin,(req,res)=>{
+  const ks=db.prepare('SELECT * FROM reseller_keys ORDER BY id DESC').all();
+  const generated=req.session.generated_reseller_key||''; delete req.session.generated_reseller_key;
+  const generatedBox=generated?`<div class="alert success" style="padding:20px;border-color:#5d32d9;background:#120c24"><div style="font-weight:900;font-size:1.1rem">🎉 สร้างคีย์ตัวแทนสำเร็จ</div><div class="muted" style="margin:6px 0 10px">ส่งคีย์นี้ให้ตัวแทนได้เลย</div><div class="flex"><input id="generatedKey" value="${esc(generated)}" readonly style="flex:1;font-size:1.05rem;font-weight:900;background:#09090b;color:#fff;border:1px solid #3b2a62;border-radius:13px;padding:13px"><button type="button" class="btn purple" onclick="navigator.clipboard.writeText(document.getElementById('generatedKey').value).then(()=>this.textContent='คัดลอกแล้ว ✓')">คัดลอก</button></div></div>`:'';
+  res.send(adminLayout('คีย์ตัวแทน',`<section class="adminsection"><div class="between"><div><h1>🏷️ คีย์ตัวแทน</h1><p class="muted">สร้างคีย์ให้ตัวแทนเพื่อเปิดราคาพิเศษ เช่น ลด 40%</p></div></div>
+  ${generatedBox}
+  <form method="post" action="/admin/reseller-keys" class="card" style="padding:20px;margin:18px 0"><h2 style="margin-top:0">สร้างคีย์ใหม่</h2><div class="row"><div class="field"><label>ส่วนลด (%)</label><input type="number" name="discount_percent" value="40" min="1" max="90" required></div><div class="field"><label>จำนวนตัวแทนที่ใช้คีย์ได้</label><input type="number" name="max_uses" value="1" min="0"><div class="muted small">ใส่ 1 = ใช้ได้ 1 บัญชี, ใส่ 0 = ไม่จำกัด</div></div></div><div class="field"><label>วันหมดอายุ (ไม่ใส่ = ไม่หมดอายุ)</label><input type="datetime-local" name="expires_at"></div><button class="btn purple" style="font-size:1rem;padding:14px 20px">＋ สร้างคีย์ตัวแทน</button></form>
+  <div class="tablewrap card"><table><tr><th>คีย์</th><th>ส่วนลด</th><th>ใช้แล้ว</th><th>หมดอายุ</th><th>สถานะ</th><th></th></tr>${ks.map(k=>`<tr><td><div class="flex"><b>${esc(k.code)}</b><button type="button" class="btn" onclick="navigator.clipboard.writeText('${esc(k.code)}').then(()=>this.textContent='✓')">คัดลอก</button></div></td><td><span class="status green">-${k.discount_percent}%</span></td><td>${k.used_count}${k.max_uses?' / '+k.max_uses:''}</td><td>${k.expires_at?new Date(k.expires_at).toLocaleString('th-TH'):'ไม่หมดอายุ'}</td><td>${k.active?'<span class="status green">เปิด</span>':'<span class="status red">ปิด</span>'}</td><td><form method="post" action="/admin/reseller-keys/${k.id}/toggle"><button class="btn">${k.active?'ปิดคีย์':'เปิดคีย์'}</button></form></td></tr>`).join('')}</table></div></section>`,req));
+});
+app.post('/admin/reseller-keys',admin,(req,res)=>{
+  const discount=Math.max(1,Math.min(90,Math.trunc(Number(req.body.discount_percent)||40)));
+  const maxUses=Math.max(0,Math.trunc(Number(req.body.max_uses)||0));
+  try{const code=generateResellerCode();db.prepare('INSERT INTO reseller_keys(code,discount_percent,max_uses,expires_at) VALUES(?,?,?,?)').run(code,discount,maxUses,req.body.expires_at||null);req.session.generated_reseller_key=code;flash(req,'success','สร้างคีย์ตัวแทนแล้ว');}catch(e){flash(req,'error','สร้างคีย์ไม่สำเร็จ');}
+  res.redirect('/admin/reseller-keys');
+});
+app.post('/admin/reseller-keys/:id/toggle',admin,(req,res)=>{db.prepare('UPDATE reseller_keys SET active=CASE active WHEN 1 THEN 0 ELSE 1 END WHERE id=?').run(req.params.id);redirectBack(req,res,'/admin/reseller-keys');});
 
 app.get('/admin/settings',admin,(req,res)=>res.send(adminLayout('ตั้งค่าร้าน',`<section class="adminsection"><h1>ตั้งค่าร้าน</h1><form class="card" style="padding:20px" method="post" enctype="multipart/form-data">
 <div class="row"><div class="field"><label>ชื่อร้าน</label><input name="store_name" value="${esc(setting('store_name'))}"></div><div class="field"><label>Tagline</label><input name="tagline" value="${esc(setting('tagline'))}"></div></div>
