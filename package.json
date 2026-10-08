@@ -1,6 +1,6 @@
 {
-  "name": "ken-code-store-easy",
-  "version": "2.0.0",
+  "name": "ken-code-store",
+  "version": "4.0.0",
   "private": true,
   "scripts": {
     "start": "node server.js"
